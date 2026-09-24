@@ -24,10 +24,12 @@ interface TurnstileResult {
 }
 
 const MODES: Record<Mode, { label: string }> = {
+  invisible: { label: "Invisible" },
   managed: { label: "Managed" },
   "non-interactive": { label: "Non-interactive" },
-  invisible: { label: "Invisible" },
 };
+
+const MODE_ORDER: Mode[] = ["invisible", "managed", "non-interactive"];
 
 const SAFE_REQUEST_HEADERS = new Set([
   "accept",
@@ -58,6 +60,11 @@ const SAFE_REQUEST_HEADERS = new Set([
 
 const MAX_VALIDATION_REQUEST_BYTES = 4_096;
 const SITEVERIFY_TIMEOUT_MS = 30_000;
+const TURNSTILE_TEST_SECRETS = new Set([
+  "1x0000000000000000000000000000000AA",
+  "2x0000000000000000000000000000000AA",
+  "3x0000000000000000000000000000000AA",
+]);
 const MODE_VARIABLES: Record<
   Mode,
   { sitekey: keyof TurnstileBindings; secret: keyof TurnstileBindings }
@@ -241,6 +248,10 @@ function page(mode: Mode, env: TurnstileEnv, request: Request) {
   const meta = MODES[mode];
   const { sitekey } = valuesFor(mode, env);
   const snapshot = requestSnapshot(request);
+  const navigation = MODE_ORDER.map(
+    (item) =>
+      `<li><a href="/${item}"${item === mode ? ' aria-current="page"' : ""}>${MODES[item].label}</a></li>`,
+  ).join("");
   const list = (items: string[][], valueIds: Record<string, string> = {}) =>
     items
       .map(
@@ -266,6 +277,12 @@ function page(mode: Mode, env: TurnstileEnv, request: Request) {
     <script type="module" src="/app.js"></script>
   </head>
   <body data-mode="${mode}" data-action="turnstile-${mode}" data-sitekey="${escapeHtml(sitekey)}" data-configured="${Boolean(sitekey)}" data-worker-time="${Date.now()}">
+    <aside class="mode-sidebar">
+      <nav aria-label="Widget modes">
+        <p class="mode-nav-label">Widget mode</p>
+        <ul>${navigation}</ul>
+      </nav>
+    </aside>
     <main>
       <div class="stage">
         <section class="mode" aria-label="${meta.label} Turnstile mode">
@@ -404,14 +421,15 @@ async function validate(request: Request, mode: Mode, env: TurnstileEnv) {
   const expectedAction = `turnstile-${mode}`;
   const expectedHostname = new URL(request.url).hostname.toLowerCase();
   const returnedHostname = result.hostname?.toLowerCase();
+  const usesTestingSecret = TURNSTILE_TEST_SECRETS.has(secret);
   const failures = [
     ...(!result.success
       ? (result["error-codes"] ?? ["Siteverify rejected the response."])
       : []),
-    ...(result.action !== expectedAction
+    ...(!usesTestingSecret && result.action !== expectedAction
       ? ["Turnstile action did not match this mode."]
       : []),
-    ...(returnedHostname !== expectedHostname
+    ...(!usesTestingSecret && returnedHostname !== expectedHostname
       ? ["Turnstile hostname did not match this request."]
       : []),
   ];
@@ -455,6 +473,11 @@ export default {
     ) {
       return env.ASSETS.fetch(request);
     }
+    if (
+      url.pathname === "/" &&
+      (request.method === "GET" || request.method === "HEAD")
+    )
+      return Response.redirect(new URL("/managed", url), 302);
     if (url.pathname === "/")
       return new Response(null, {
         status: 204,

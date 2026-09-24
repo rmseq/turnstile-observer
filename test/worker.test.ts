@@ -28,6 +28,20 @@ async function fetchWorker(request: Request, env = testEnvironment()) {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("Turnstile Observer Worker", () => {
+  it.each(["GET", "HEAD"])(
+    "redirects %s requests from the apex to managed mode",
+    async (method) => {
+      const response = await fetchWorker(
+        new Request("https://observer.test/", { method }),
+      );
+
+      expect(response.status).toBe(302);
+      expect(response.headers.get("location")).toBe(
+        "https://observer.test/managed",
+      );
+    },
+  );
+
   it("serves a mode page with its browser protections", async () => {
     const response = await fetchWorker(
       new Request("https://observer.test/managed"),
@@ -37,7 +51,11 @@ describe("Turnstile Observer Worker", () => {
     expect(response.headers.get("content-security-policy")).toContain(
       "default-src 'self'",
     );
-    await expect(response.text()).resolves.toContain("Managed");
+    const body = await response.text();
+    expect(body).toContain('href="/managed" aria-current="page"');
+    expect(body).toMatch(
+      /href="\/invisible"[\s\S]*href="\/managed"[\s\S]*href="\/non-interactive"/,
+    );
   });
 
   it("routes GET and HEAD asset requests through the ASSETS binding", async () => {
@@ -156,6 +174,40 @@ describe("Turnstile Observer Worker", () => {
         signal: expect.any(AbortSignal),
       }),
     );
+  });
+
+  it("accepts placeholder fields returned for a testing secret", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              success: true,
+              hostname: "example.com",
+              "error-codes": [],
+              metadata: { result_with_testing_key: true },
+            }),
+            {
+              headers: { "content-type": "application/json" },
+            },
+          ),
+      ),
+    );
+
+    const response = await fetchWorker(
+      new Request("https://observer.test/managed", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ token: "XXXX.DUMMY.TOKEN.XXXX" }),
+      }),
+      testEnvironment({
+        TURNSTILE_MANAGED_SECRET: "1x0000000000000000000000000000000AA",
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({ success: true });
   });
 
   it.each([
