@@ -39,6 +39,7 @@ describe("Turnstile Observer Worker", () => {
       expect(response.headers.get("location")).toBe(
         "https://observer.test/managed",
       );
+      await expect(response.text()).resolves.toBe("");
     },
   );
 

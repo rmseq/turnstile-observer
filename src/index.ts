@@ -477,7 +477,7 @@ export default {
       url.pathname === "/" &&
       (request.method === "GET" || request.method === "HEAD")
     )
-      return Response.redirect(new URL("/managed", url), 302);
+      return Response.redirect(new URL("/managed", url).href, 302);
     if (url.pathname === "/")
       return new Response(null, {
         status: 204,
